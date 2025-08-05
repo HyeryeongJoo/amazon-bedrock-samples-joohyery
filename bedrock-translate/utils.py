@@ -103,74 +103,78 @@ def add_python_path(module_path):
 # 번역 문서 생성 함수들
 # =============================================================================
 
-def format_translation_document(grouped_texts: List[Dict], 
+def format_translation_document(grouped_texts, 
                                source_language: str = "Korean", 
                                target_language: str = "English") -> pd.DataFrame:
     """
     번역가가 사용할 엑셀 문서 형식으로 데이터를 포맷팅
-    
-    Args:
-        grouped_texts: Claude가 분석한 텍스트 그룹 리스트
-        source_language: 소스 언어 (기본값: Korean)
-        target_language: 타겟 언어 (기본값: English)
-    
-    Returns:
-        pd.DataFrame: 엑셀로 저장할 데이터프레임
     """
     
-    # 번역 문서용 데이터 구조 생성
+    # 1. 그룹 리스트 추출
+    if isinstance(grouped_texts, dict) and 'groups' in grouped_texts:
+        groups = grouped_texts['groups']
+    elif isinstance(grouped_texts, list):
+        groups = grouped_texts
+    else:
+        groups = [grouped_texts]  # 단일 값인 경우 리스트로 변환
+    
     translation_data = []
     
-    for i, group in enumerate(grouped_texts, 1):
-        # 각 그룹의 텍스트들을 하나의 문자열로 결합
-        if isinstance(group, dict):
-            # 그룹이 딕셔너리 형태인 경우
+    for i, group in enumerate(groups, 1):
+        try:
             group_text = ""
-            if 'category' in group:
-                group_text += f"[{group['category']}]\n"
-            if 'texts' in group:
-                group_text += "\n".join(group['texts'])
-            elif 'content' in group:
-                group_text += group['content']
             
-            category = group.get('category', f'Group_{i}')
-            description = group.get('description', '')
-            priority = group.get('priority', 'medium')
-            location = group.get('location', '')
+            if isinstance(group, dict):
+                # 딕셔너리인 경우: {"category": "...", "texts": [...]} 형태
+                if 'texts' in group:
+                    texts = group['texts']
+                    if isinstance(texts, list):
+                        group_text = ' | '.join(str(item) for item in texts if str(item).strip())
+                    else:
+                        group_text = str(texts).strip()
+                else:
+                    # texts 키가 없는 경우 전체를 문자열로 변환
+                    group_text = str(group).strip()
+                    
+            elif isinstance(group, list):
+                # 리스트인 경우: ["텍스트1", "텍스트2", ...] 형태  
+                group_text = ' | '.join(str(item) for item in group if str(item).strip())
+                
+            else:
+                # 기타 형태
+                group_text = str(group).strip()
             
-        elif isinstance(group, str):
-            # 그룹이 문자열인 경우
-            group_text = group
-            category = f'Group_{i}'
-            description = ''
-            priority = 'medium'
-            location = ''
-        else:
-            # 기타 형태인 경우
-            group_text = str(group)
-            category = f'Group_{i}'
-            description = ''
-            priority = 'medium'
-            location = ''
-        
-        # 빈 텍스트는 제외
-        if group_text.strip():
+            # 빈 텍스트는 건너뛰기
+            if not group_text:
+                continue
+                
             translation_data.append({
                 'ID': f'T{i:03d}',
-                'Category': category,
-                'Priority': priority,
-                'Location': location,
-                'Description': description,
-                f'Original_Text_{source_language}': group_text.strip(),
-                f'Translated_Text_{target_language}': '',  # 번역가가 채울 빈 칸
-                'Notes': '',  # 번역가가 메모할 수 있는 칸
-                'Status': 'Pending'  # 번역 상태
+                'Category': f'Group_{i}',
+                'Priority': 'medium',
+                'Location': '',
+                'Description': '',
+                f'Original_Text_{source_language}': group_text,
+                f'Translated_Text_{target_language}': '',
+                'Notes': '',
+                'Status': 'Pending'
             })
+            
+        except Exception as e:
+            print(f"그룹 {i} 처리 중 오류: {e}")
+            continue
     
-    # 데이터프레임 생성
-    df = pd.DataFrame(translation_data)
+    if not translation_data:
+        print("경고: 처리할 수 있는 텍스트 그룹이 없습니다.")
+        # 빈 데이터프레임이라도 구조는 유지
+        return pd.DataFrame(columns=[
+            'ID', 'Category', 'Priority', 'Location', 'Description', 
+            f'Original_Text_{source_language}', f'Translated_Text_{target_language}', 
+            'Notes', 'Status'
+        ])
     
-    return df
+    return pd.DataFrame(translation_data)
+
 
 def save_translation_document(df: pd.DataFrame, 
                              filename: str = None, 
