@@ -31,7 +31,7 @@ Amazon Bedrock을 활용한 웹 포트폴리오 이미지 분석 및 사용자 �
 ## 프로젝트 구조
 
 ```
-bedrock-web-portfolio-analyzer/
+web-portfolio-recommender/
 ├── portfolio/
 │   ├── skincare.png           # 스킨케어 웹사이트 포트폴리오 샘플
 │   └── tech.png              # 기술 회사 웹사이트 포트폴리오 샘플

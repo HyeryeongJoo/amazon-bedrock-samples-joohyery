@@ -30,7 +30,7 @@ This project is a tool that comprehensively analyzes web portfolio images using 
 ## Project Structure
 
 ```
-bedrock-web-portfolio-analyzer/
+web-portfolio-recommender/
 ├── portfolio/
 │   ├── skincare.png           # Skincare website portfolio sample
 │   └── tech.png              # Tech company website portfolio sample
