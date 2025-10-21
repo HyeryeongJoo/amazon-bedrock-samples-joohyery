@@ -34,13 +34,13 @@ bedrock_prompt_management_system/
 ## 🎯 사용 시나리오
 
 **단순 조회만 필요한 경우**
-→ `bedrock_prompt_management_version_control_simple.py` 사용
+→ Simple Version 사용
 
 **버전 관리가 필요한 경우**
-→ `bedrock_prompt_management_version_control_advanced.py` 사용
+→ Advanced Version 사용
 
 **프로덕션 배포가 필요한 경우**
-→ `bedrock_prompt_management_version_control_advanced.py`의 promote 기능 사용
+→ Advanced Version의 promote 기능 사용
 
 
 ## 🛠️ Quick Start

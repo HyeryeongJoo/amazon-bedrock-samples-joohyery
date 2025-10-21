@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-Amazon Bedrock Prompt Management의 prompt 조회
+Amazon Bedrock Prompt Management Utility - Simple version
+Key features:
+- Prompt Text Retrieval: Simple prompt content retrieval through Parameter Store
+- Environment Status Check: Compare prompt status between DEV/PROD environments
+- Prompt Comparison: Check content consistency between two environments
 """
 
 import boto3
@@ -9,7 +13,6 @@ from typing import Dict, Optional, Any
 from botocore.exceptions import ClientError
 
 
-# 환경 변수 설정
 ENVIRONMENT_CONFIG = {
     'dev': {
         'parameter_store_path': '/prompts/text2sql/dev/current',
@@ -36,7 +39,7 @@ class PromptUtils:
         self.region = region_name
     
     def get_prompt_identifier_from_parameter(self, parameter_name: str) -> Optional[str]:
-        """Parameter Store에서 Prompt ARN 또는 ID 조회"""
+        """Retrieve Prompt ID from Parameter Store"""
         try:
             response = self.ssm_client.get_parameter(
                 Name=parameter_name,
@@ -50,19 +53,19 @@ class PromptUtils:
             return None
     
     def get_prompt_content_via_parameter(self, parameter_name: str) -> Optional[Dict[str, Any]]:
-        """Parameter Store를 통해 Prompt 내용을 완전히 조회"""
-        # 1. Parameter Store에서 Prompt ID 조회
+        """Retrive Prompt details from Parameter Store"""
+        # 1. Retrieve Prompt ID from Parameter Store
         prompt_identifier = self.get_prompt_identifier_from_parameter(parameter_name)
         if not prompt_identifier:
             return None
         
-        # 2. Bedrock에서 Prompt 상세 정보 조회
+        # 2. Retrieve Prompt detailed information from Bedrock
         try:
             response = self.bedrock_agent_client.get_prompt(
                 promptIdentifier=prompt_identifier
             )
             
-            # 3. 응답 데이터 정리
+            # 3. Organize response data
             prompt_info = {
                 'name': response.get('name'),
                 'description': response.get('description'),
@@ -73,7 +76,7 @@ class PromptUtils:
                 'variants': []
             }
             
-            # 4. Prompt variants에서 실제 텍스트 추출
+            # 4. Extract actual text from Prompt variants
             for variant in response.get('variants', []):
                 variant_info = {
                     'name': variant.get('name'),
@@ -81,7 +84,7 @@ class PromptUtils:
                     'content': None
                 }
                 
-                # 템플릿 설정에서 실제 텍스트 추출
+                # Extract actual text from template configuration
                 template_config = variant.get('templateConfiguration', {})
                 if 'text' in template_config:
                     variant_info['content'] = template_config['text'].get('text')
@@ -95,7 +98,7 @@ class PromptUtils:
             return None
     
     def get_prompt_text_only(self, parameter_name: str) -> str:
-        """Prompt 텍스트만 간단히 반환"""
+        """Return Prompt text"""
         print("📝 Simple text retrieval:")
         print("-" * 60)
 
@@ -105,7 +108,7 @@ class PromptUtils:
         return ''
     
     def compare_prompts(self, param1: str, param2: str):
-        """두 Parameter의 Prompt 내용 비교"""
+        """Compare Prompt text betwwen two parameter"""
         print("-" * 60)
 
         content1 = self.get_prompt_content_via_parameter(param1)
@@ -126,7 +129,7 @@ class PromptUtils:
         print(f"\n🔍 Same content: {'✅ Yes' if text1 == text2 else '❌ No'}")
     
     def list_prompt_environments(self, base_path: str):
-        """환경별 Prompt Parameter 조회"""
+        """Retrieve Prompt Parameter by envrionment - dev or prod"""
         environments = ['dev', 'prod']
         
         print(f"🌍 2. Environment-based Prompt Status for: {base_path}")
@@ -142,11 +145,11 @@ class PromptUtils:
             else:
                 print(f"❌ {env.upper():8} | Not found or error")
 
-# 사용 예제
+# Usage Example
 if __name__ == "__main__":
     utils = PromptUtils()
     
-    # 1. 간단하게 모든 환경의 프롬프트 텍스트 조회
+    # 1. Simply retrie of prompt text from all environments
     print("\n" + "="*60)
     print("📝 1. Retrieving prompts from all environments:")
     print("-" * 60)
@@ -160,7 +163,7 @@ if __name__ == "__main__":
         
         text = utils.get_prompt_text_only(parameter_path)
         if text:
-            # 텍스트가 너무 길면 처음 100자만 표시
+            # Display only first 100 characters if text is too long
             display_text = text[:100] + "..." if len(text) > 100 else text
             print(f"✅ Prompt text: {display_text}")
         else:
@@ -170,7 +173,7 @@ if __name__ == "__main__":
     
     print("\n" + "="*60)
     
-    # 2. 환경별 상태 조회 (환경 변수 기반)
+    # 2. Environment-based status check (environment variable based)
     print("🌍 2. Environment-based Prompt Status:")
     print("-" * 60)
     
@@ -186,7 +189,7 @@ if __name__ == "__main__":
     
     print("\n" + "="*60)
     
-    # 3. 환경별 비교 (환경 변수 기반)
+    # 3. Environment-based comparison (environment variable based)
     env_list = list(ENVIRONMENT_CONFIG.items())
     if len(env_list) >= 2:
         env1_name, env1_config = env_list[0]

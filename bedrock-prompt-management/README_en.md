@@ -1,6 +1,7 @@
 # Bedrock Prompt Management System
 
-A Python utility system for efficiently managing prompts in Amazon Bedrock Prompt Management. Provides environment-specific prompt management, version control, and rollback functionality using AWS Systems Manager Parameter Store.
+A Python utility system for efficiently managing prompts in Amazon Bedrock Prompt Management. 
+Provides environment-specific prompt management, version control, and rollback functionality using AWS Systems Manager Parameter Store.
 
 ## 📁 Project Structure
 
@@ -35,13 +36,13 @@ bedrock_prompt_management_system/
 ## 🎯 Usage Scenarios
 
 **When you only need simple retrieval**
-→ Use `bedrock_prompt_management_version_control_simple.py`
+→ Use Simple Version
 
 **When version management is required**
-→ Use `bedrock_prompt_management_version_control_advanced.py`
+→ Use Advanced Version
 
 **When production deployment is needed**
-→ Use the promote feature in `bedrock_prompt_management_version_control_advanced.py`
+→ Use the promote feature in Advanced Version
 
 ## 🛠️ Quick Start
 
