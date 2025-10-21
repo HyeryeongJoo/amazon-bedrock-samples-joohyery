@@ -1,6 +1,7 @@
 # Amazon Bedrock Prompt Management System
 
-Amazon Bedrock Prompt Management에서 프롬프트를 효율적으로 관리하기 위한 Python 유틸리티 시스템입니다. AWS Systems Manager Parameter Store를 활용한 환경별 프롬프트 관리, 버전 제어, 롤백 기능을 제공합니다.
+Amazon Bedrock Prompt Management에서 프롬프트를 효율적으로 관리하기 위한 Python 유틸리티 시스템입니다. 
+AWS Systems Manager Parameter Store를 활용한 환경별 프롬프트 관리, 버전 제어, 롤백 기능을 제공합니다.
 
 ## 📁 프로젝트 구조
 
@@ -33,13 +34,13 @@ bedrock_prompt_management_system/
 ## 🎯 사용 시나리오
 
 **단순 조회만 필요한 경우**
-→ `simple.py` 사용
+→ `bedrock_prompt_management_version_control_simple.py` 사용
 
 **버전 관리가 필요한 경우**
-→ `advanced.py` 사용
+→ `bedrock_prompt_management_version_control_advanced.py` 사용
 
 **프로덕션 배포가 필요한 경우**
-→ `advanced.py`의 promote 기능 사용
+→ `bedrock_prompt_management_version_control_advanced.py`의 promote 기능 사용
 
 
 ## 🛠️ Quick Start

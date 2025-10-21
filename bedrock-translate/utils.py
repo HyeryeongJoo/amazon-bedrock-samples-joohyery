@@ -10,6 +10,128 @@ import pandas as pd
 from PIL import Image
 from datetime import datetime
 from typing import Dict, List, Optional
+import boto3
+from botocore.config import Config
+
+# =============================================================================
+# 파일 타입 감지 함수들
+# =============================================================================
+
+def is_pdf(file_path: str) -> bool:
+    """파일이 PDF인지 확인"""
+    return file_path.lower().endswith('.pdf')
+
+def is_image(file_path: str) -> bool:
+    """파일이 이미지인지 확인"""
+    try:
+        with Image.open(file_path) as img:
+            img.verify()
+        return True
+    except Exception:
+        return False
+
+def get_file_type(file_path: str) -> str:
+    """파일 타입 반환 (pdf, image, unknown)"""
+    if is_pdf(file_path):
+        return 'pdf'
+    elif is_image(file_path):
+        return 'image'
+    else:
+        return 'unknown'
+
+# =============================================================================
+# PDF 처리 함수들
+# =============================================================================
+
+def encode_pdf(pdf_path: str) -> str:
+    """PDF 파일을 base64로 인코딩"""
+    if not os.path.exists(pdf_path):
+        raise FileNotFoundError(f"PDF 파일을 찾을 수 없습니다: {pdf_path}")
+    
+    try:
+        with open(pdf_path, 'rb') as pdf_file:
+            return base64.b64encode(pdf_file.read()).decode('utf-8')
+    except Exception as e:
+        raise Exception(f"PDF 인코딩 중 오류 발생: {str(e)}")
+
+def process_pdf_with_claude(pdf_path: str, client=None, model_id="us.anthropic.claude-sonnet-4-20250514-v1:0") -> str:
+    """Claude 4의 PDF Chat 기능을 사용하여 PDF 텍스트 추출"""
+    if client is None:
+        config = Config(read_timeout=300)
+        client = boto3.client(service_name="bedrock-runtime", region_name="us-west-2", config=config)
+    
+    try:
+        # PDF를 base64로 인코딩
+        pdf_base64 = encode_pdf(pdf_path)
+        
+        # Claude 4 PDF Chat용 시스템 프롬프트
+        system_prompt = """You are a professional text extraction specialist. Your task is to carefully analyze PDF documents and extract ALL text content for translation purposes.
+
+## Instructions:
+1. Extract ALL visible text from the PDF, including:
+   - Headlines and titles
+   - Body text and paragraphs
+   - Captions and descriptions
+   - Contact information (phone numbers, addresses, emails, websites)
+   - Small print and disclaimers
+   - Menu items, prices, or product listings
+   - Date and time information
+   - Terms and conditions
+   - Table contents and data
+
+2. Organize the extracted text in a logical order:
+   - Follow the document flow (page by page, section by section)
+   - Maintain the original structure as much as possible
+   - Group related content together
+   - Clearly separate different sections
+
+3. Present the text in the original language - do NOT translate anything
+4. If text is unclear or partially visible, note it as [UNCLEAR: approximate text]
+5. Maintain formatting structure where important for context
+
+Your goal is to ensure no text content is missed so that the subsequent translation will be complete and accurate."""
+        
+        user_prompt = f"""Please extract all text content from this PDF document. 
+The document may contain Korean text that needs to be extracted for translation purposes.
+Maintain the original structure and organization of the content."""
+        
+        # Converse API 호출
+        response = client.converse(
+            modelId=model_id,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "document": {
+                                "format": "pdf",
+                                "name": os.path.basename(pdf_path),
+                                "source": {
+                                    "bytes": base64.b64decode(pdf_base64)
+                                }
+                            }
+                        },
+                        {
+                            "text": user_prompt
+                        }
+                    ]
+                }
+            ],
+            system=[
+                {
+                    "text": system_prompt
+                }
+            ],
+            inferenceConfig={
+                "maxTokens": 4000,
+                "temperature": 0.1
+            }
+        )
+        
+        return response['output']['message']['content'][0]['text']
+        
+    except Exception as e:
+        raise Exception(f"PDF 처리 중 오류 발생: {str(e)}")
 
 # =============================================================================
 # 이미지 처리 함수들
@@ -79,6 +201,24 @@ def encode_image(image_path: str) -> str:
         return validate_and_resize_image(image_path)
     except Exception as e:
         raise Exception(f"이미지 인코딩 중 오류 발생: {str(e)}")
+
+def encode_file(file_path: str) -> tuple:
+    """파일 타입에 따라 적절한 인코딩 방법 선택
+    
+    Returns:
+        tuple: (encoded_data, file_type, format)
+    """
+    file_type = get_file_type(file_path)
+    
+    if file_type == 'pdf':
+        encoded_data = encode_pdf(file_path)
+        return encoded_data, 'pdf', 'pdf'
+    elif file_type == 'image':
+        encoded_data = encode_image(file_path)
+        image_format = get_image_format(file_path)
+        return encoded_data, 'image', image_format
+    else:
+        raise ValueError(f"지원하지 않는 파일 형식입니다: {file_path}")
 
 # =============================================================================
 # 파일 처리 함수들
@@ -178,14 +318,14 @@ def format_translation_document(grouped_texts,
 
 def save_translation_document(df: pd.DataFrame, 
                              filename: str = None, 
-                             image_name: str = "document") -> str:
+                             document_name: str = "document") -> str:
     """
     번역 문서를 final_results 폴더에 엑셀 파일로 저장
     
     Args:
         df: 저장할 데이터프레임
         filename: 파일명 (None인 경우 자동 생성)
-        image_name: 원본 이미지 이름 (파일명에 포함)
+        document_name: 원본 문서 이름 (파일명에 포함)
     
     Returns:
         str: 저장된 파일의 전체 경로
@@ -202,7 +342,7 @@ def save_translation_document(df: pd.DataFrame,
     # 파일명 생성
     if filename is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"translation_document_{image_name}_{timestamp}.xlsx"
+        filename = f"translation_document_{document_name}_{timestamp}.xlsx"
     
     # .xlsx 확장자 확인
     if not filename.endswith('.xlsx'):
@@ -266,71 +406,132 @@ def save_translation_document(df: pd.DataFrame,
         
         # 행 높이 조정
         for row in range(2, worksheet.max_row + 1):
-            worksheet.row_dimensions[row].height = 60
-        
-        # 정보 시트 추가
-        info_data = {
-            'Field': ['Creation Date', 'Source Language', 'Target Language', 'Total Groups', 'Instructions'],
-            'Value': [
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'Korean',
-                'English', 
-                len(df),
-                'Please fill in the Translated_Text column with appropriate translations. Use Notes column for any comments or questions.'
-            ]
-        }
-        info_df = pd.DataFrame(info_data)
-        info_df.to_excel(writer, sheet_name='Info', index=False)
+            worksheet.row_dimensions[row].height = 30
     
     print(f"번역 문서가 저장되었습니다: {file_path}")
-    print(f"총 {len(df)}개의 텍스트 그룹이 포함되어 있습니다.")
-    
     return file_path
 
-def create_translation_workflow(grouped_texts: List[Dict], 
-                              image_name: str = "document",
-                              source_lang: str = "Korean",
-                              target_lang: str = "English") -> str:
-    """
-    전체 번역 워크플로우 실행
+# =============================================================================
+# 통합 처리 함수들
+# =============================================================================
+
+def process_document_with_claude(file_path: str, client=None, model_id="us.anthropic.claude-sonnet-4-20250514-v1:0") -> str:
+    """문서 타입에 따라 적절한 Claude 모델 기능을 사용하여 텍스트 추출"""
+    if client is None:
+        config = Config(read_timeout=300)
+        client = boto3.client(service_name="bedrock-runtime", region_name="us-west-2", config=config)
     
-    Args:
-        grouped_texts: Claude가 분석한 텍스트 그룹들
-        image_name: 원본 이미지 이름
-        source_lang: 소스 언어
-        target_lang: 타겟 언어
+    file_type = get_file_type(file_path)
     
-    Returns:
-        str: 저장된 파일 경로
-    """
+    if file_type == 'pdf':
+        print(f"PDF 파일 감지: Claude 4 PDF Chat 기능 사용")
+        return process_pdf_with_claude(file_path, client, model_id)
+    elif file_type == 'image':
+        print(f"이미지 파일 감지: Claude 4 Vision 기능 사용")
+        return process_image_with_claude(file_path, client, model_id)
+    else:
+        raise ValueError(f"지원하지 않는 파일 형식입니다: {file_path}")
+
+def process_image_with_claude(image_path: str, client=None, model_id="us.anthropic.claude-sonnet-4-20250514-v1:0") -> str:
+    """Claude 4의 Vision 기능을 사용하여 이미지 텍스트 추출"""
+    if client is None:
+        config = Config(read_timeout=300)
+        client = boto3.client(service_name="bedrock-runtime", region_name="us-west-2", config=config)
     
-    # 1. 번역 문서 포맷팅
+    try:
+        # 이미지를 base64로 인코딩
+        image_base64 = encode_image(image_path)
+        image_format = get_image_format(image_path)
+        
+        # 시스템 프롬프트
+        system_prompt = """You are a professional text extraction specialist. Your task is to carefully analyze Korean leaflets/brochures and extract ALL text content for English translation purposes.
+
+## Instructions:
+1. Examine the provided Korean leaflet thoroughly
+2. Extract ALL visible text, including:
+   - Headlines and titles
+   - Body text and paragraphs
+   - Captions and descriptions
+   - Contact information (phone numbers, addresses, emails, websites)
+   - Small print and disclaimers
+   - Menu items, prices, or product listings
+   - Date and time information
+   - Terms and conditions
+
+3. DO NOT extract text that appears within images, logos, graphics, or decorative elements
+   - Focus only on regular text content that is part of the leaflet's main text layout
+   - Skip any text that is embedded in photographs, illustrations, or logo designs
+
+4. Organize the extracted text in a logical order:
+   - Start with main headings/titles
+   - Follow the visual flow of the leaflet (left to right, top to bottom)
+   - Group related content together
+   - Clearly separate different sections
+
+5. Present the text in the original Korean language - do NOT translate anything
+6. If text is unclear or partially visible, note it as [UNCLEAR: approximate text]
+7. Maintain the original formatting structure as much as possible
+
+Your goal is to ensure no regular text content is missed while excluding text within images/graphics, so that the subsequent English translation will be complete and accurate for the main textual content only."""
+        
+        user_prompt = f"""제공된 리플렛의 텍스트를 추출하세요."""
+        
+        # Converse API 호출
+        response = client.converse(
+            modelId=model_id,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "image": {
+                                "format": image_format,
+                                "source": {
+                                    "bytes": base64.b64decode(image_base64)
+                                }
+                            }
+                        },
+                        {
+                            "text": user_prompt
+                        }
+                    ]
+                }
+            ],
+            system=[
+                {
+                    "text": system_prompt
+                }
+            ],
+            inferenceConfig={
+                "maxTokens": 4000,
+                "temperature": 0.1
+            }
+        )
+        
+        return response['output']['message']['content'][0]['text']
+        
+    except Exception as e:
+        raise Exception(f"이미지 처리 중 오류 발생: {str(e)}")
+
+def create_translation_workflow(grouped_texts, 
+                               document_name: str = "document",
+                               source_lang: str = "Korean", 
+                               target_lang: str = "English") -> str:
+    """번역 워크플로우 생성 (이미지와 PDF 모두 지원)"""
     print("번역 문서를 포맷팅 중...")
-    translation_df = format_translation_document(
-        grouped_texts, 
-        source_lang, 
-        target_lang
-    )
+    df = format_translation_document(grouped_texts, source_lang, target_lang)
     
-    # 2. 문서 저장
     print("번역 문서를 저장 중...")
-    file_path = save_translation_document(
-        translation_df, 
-        image_name=image_name
-    )
+    file_path = save_translation_document(df, document_name=document_name)
     
-    # 3. 결과 요약 출력
-    print("\n=== 번역 문서 생성 완료 ===")
+    print(f"총 {len(df)}개의 텍스트 그룹이 포함되어 있습니다.")
+    print(f"\n=== 번역 문서 생성 완료 ===")
     print(f"파일 경로: {file_path}")
-    print(f"텍스트 그룹 수: {len(translation_df)}")
+    print(f"텍스트 그룹 수: {len(df)}")
     print(f"소스 언어: {source_lang}")
     print(f"타겟 언어: {target_lang}")
     
     return file_path
-
-# =============================================================================
-# 파일 시스템 유틸리티
-# =============================================================================
 
 def check_file_paths(image_path: str, html_path: str) -> tuple:
     """파일 경로 존재 여부 확인"""
@@ -342,18 +543,17 @@ def check_file_paths(image_path: str, html_path: str) -> tuple:
     
     return image_exists, html_exists
 
-def list_ocr_results(base_path: str = None):
-    """OCR 결과 폴더의 파일 목록 출력"""
-    if base_path is None:
-        base_path = os.getcwd()
-    
-    ocr_results_path = os.path.join(base_path, 'ocr-results')
-    
-    if os.path.exists(ocr_results_path):
-        print("OCR 결과 파일들:")
-        for filename in os.listdir(ocr_results_path):
-            print(f"  - {filename}")
-        return [f for f in os.listdir(ocr_results_path)]
-    else:
-        print("'ocr-results' 폴더가 현재 위치에 없습니다.")
+def list_files_in_directory(directory_path: str, extensions: List[str] = None) -> List[str]:
+    """디렉토리 내 특정 확장자 파일들 나열"""
+    if not os.path.exists(directory_path):
         return []
+    
+    files = []
+    for filename in os.listdir(directory_path):
+        if extensions:
+            if any(filename.lower().endswith(ext.lower()) for ext in extensions):
+                files.append(filename)
+        else:
+            files.append(filename)
+    
+    return sorted(files)

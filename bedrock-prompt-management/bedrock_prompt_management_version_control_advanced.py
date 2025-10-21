@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-AWS Bedrock Prompt 태그 기반 버전 제어 및 롤백 데모
-환경 변수 설정과 사용자 환경 선택 기능 포함
+Amazon Bedrock Prompt Management Utility - Advanced version
+Key features:
+- Tag-based Version Management: Create versions with meaningful tags (composite tags)
+- Cross-environment Promotion: Automated DEV → PROD promotion process
+- Rollback Functionality: Safe rollback to previous versions
+- Interactive Interface: User-friendly CLI interface
 """
 
 import boto3
@@ -11,7 +15,6 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from botocore.exceptions import ClientError
 
-# 환경 변수 설정
 ENVIRONMENT_CONFIG = {
     'dev': {
         'parameter_store_path': '/prompts/text2sql/dev/current',
@@ -31,7 +34,6 @@ ENVIRONMENT_CONFIG = {
     }
 }
 
-# 기본 설정
 DEFAULT_REGION = 'us-west-2'
 SUPPORTED_ENVIRONMENTS = ['dev', 'prod']
 
@@ -42,7 +44,7 @@ class PromptVersionController:
         self.region = region_name
         self.environment = environment.lower()
         
-        # 환경 설정 검증
+        # Verify environment settings
         if self.environment not in SUPPORTED_ENVIRONMENTS:
             raise ValueError(f"Unsupported environment: {environment}. Supported: {SUPPORTED_ENVIRONMENTS}")
         
@@ -54,10 +56,10 @@ class PromptVersionController:
     
     def get_prompt_id_from_environment(self) -> Optional[str]:
         """
-        현재 환경의 Parameter Store에서 Prompt ID 조회
+        Retrieve Prompt ID of current environment from Parameter Store
         
         Returns:
-            Prompt ID 또는 None
+            Prompt ID or None
         """
         try:
             response = self.ssm_client.get_parameter(
@@ -74,39 +76,39 @@ class PromptVersionController:
     def create_tagged_version(self, prompt_identifier: str, content: str, 
                             environment: str = None, version_tag: str = None, description: str = None) -> Optional[str]:
         """
-        태그가 포함된 새 버전 생성
+        Create new version with tags
         
         Args:
             prompt_identifier: Prompt ID
-            content: 새로운 내용
-            environment: 환경 (기본값: 현재 환경)
-            version_tag: 버전 태그 (v1.0.0, v1.1.0-beta 등)
-            description: 버전 설명
+            content: New content
+            environment: Environment (default: current environment)
+            version_tag: Version tag (e.g., v1.0.0, v1.1.0-beta)
+            description: Version description
             
         Returns:
-            새 버전 번호 또는 None
+            New version number or None
         """
-        # 환경 기본값 설정
+        # Set environment default value
         if environment is None:
             environment = self.environment
         
-        # 버전 태그 기본값 설정
+        # Set version tag default value
         if version_tag is None:
             timestamp = datetime.now().strftime('%Y%m%d-%H%M')
             version_tag = f"v1.0.0-{environment}-{timestamp}"
         
         try:
-            # 1. 먼저 현재 DRAFT 내용 업데이트
+            # 1. Update DRAFT with new content
             current_prompt = self.bedrock_agent.get_prompt(promptIdentifier=prompt_identifier)
             
-            # 기존 variants 복사 및 수정
+            # Update variants with new content
             updated_variants = []
             for variant in current_prompt.get('variants', []):
                 updated_variant = variant.copy()
                 updated_variant['templateConfiguration']['text']['text'] = content
                 updated_variants.append(updated_variant)
             
-            # DRAFT 업데이트
+            # Update DRAFT
             self.bedrock_agent.update_prompt(
                 promptIdentifier=prompt_identifier,
                 name=current_prompt.get('name'),
@@ -114,7 +116,7 @@ class PromptVersionController:
                 variants=updated_variants
             )
             
-            # 2. 새 버전 생성
+            # 2. Create new version
             version_response = self.bedrock_agent.create_prompt_version(
                 promptIdentifier=prompt_identifier,
                 description=f"{environment.upper()} {version_tag}: {description or 'Version created'}"
@@ -123,7 +125,7 @@ class PromptVersionController:
             new_version = version_response.get('version')
             new_arn = version_response.get('arn')
             
-            # 3. 환경별 기본 태그 + 추가 태그 적용
+            # 3. Apply tags (environment + metadata)
             base_tags = ENVIRONMENT_CONFIG.get(environment, {}).get('default_tags', {})
             tags = {
                 **base_tags,
@@ -150,19 +152,18 @@ class PromptVersionController:
     
     def list_versions_with_tags(self, prompt_identifier: str) -> List[Dict]:
         """
-        Prompt의 모든 버전과 태그 조회
+        List all versions of a Prompt with their tags
         
         Args:
             prompt_identifier: Prompt ID
             
         Returns:
-            버전 정보 리스트
+            List of version information with tags
         """
         try:
-            # 모든 버전 조회
             versions = []
             
-            # DRAFT 버전
+            # Get DRAFT version (no tags)
             draft_prompt = self.bedrock_agent.get_prompt(promptIdentifier=prompt_identifier)
             base_arn = draft_prompt.get('arn')
             
@@ -171,20 +172,20 @@ class PromptVersionController:
                 'arn': base_arn,
                 'name': draft_prompt.get('name'),
                 'content': draft_prompt['variants'][0]['templateConfiguration']['text']['text'][:100] + "...",
-                'tags': {}  # DRAFT는 태그 없음
+                'tags': {}  # DRAFT has no tags
             })
             
-            # 번호가 있는 버전들 - ARN 형식 사용
+            # Get numbered versions using ARN format
             version_num = 1
-            max_attempts = 20  # 최대 20개 버전까지 확인
+            max_attempts = 20  # Check up to 20 versions
             
             while version_num <= max_attempts:
                 try:
-                    # ARN 형식으로 버전 조회
+                    # Query version using ARN format
                     version_arn = f"{base_arn}:{version_num}"
                     versioned_prompt = self.bedrock_agent.get_prompt(promptIdentifier=version_arn)
                     
-                    # 태그 조회
+                    # Get tags for this version
                     try:
                         tags_response = self.bedrock_agent.list_tags_for_resource(
                             resourceArn=version_arn
@@ -205,7 +206,7 @@ class PromptVersionController:
                     
                 except ClientError as e:
                     if 'ResourceNotFoundException' in str(e) or 'ValidationException' in str(e):
-                        # 해당 버전이 없으면 다음 버전 확인
+                        # Skip if version doesn't exist
                         version_num += 1
                         continue
                     else:
@@ -221,22 +222,22 @@ class PromptVersionController:
     def rollback_to_version(self, prompt_identifier: str, target_version: str, 
                           rollback_reason: str = "Manual rollback") -> bool:
         """
-        특정 버전으로 롤백
+        Rollback to a specific version
         
         Args:
             prompt_identifier: Prompt ID
-            target_version: 롤백할 버전 번호
-            rollback_reason: 롤백 사유
+            target_version: Target version number to rollback to
+            rollback_reason: Reason for rollback
             
         Returns:
-            성공 여부
+            Success status
         """
         try:
-            # 1. 현재 DRAFT 정보 조회 (base ARN 얻기 위해)
+            # 1. Get current DRAFT info (to obtain base ARN)
             current_prompt = self.bedrock_agent.get_prompt(promptIdentifier=prompt_identifier)
             base_arn = current_prompt.get('arn')
             
-            # 2. 타겟 버전의 내용 조회
+            # 2. Get target version content
             if target_version == 'DRAFT':
                 target_prompt = current_prompt
             else:
@@ -245,7 +246,7 @@ class PromptVersionController:
             
             target_content = target_prompt['variants'][0]['templateConfiguration']['text']['text']
             
-            # 3. 현재 DRAFT를 타겟 버전 내용으로 업데이트
+            # 3. Update current DRAFT with target version content
             updated_variants = []
             for variant in current_prompt.get('variants', []):
                 updated_variant = variant.copy()
@@ -259,13 +260,13 @@ class PromptVersionController:
                 variants=updated_variants
             )
             
-            # 4. 롤백 버전 생성 (선택사항)
+            # 4. Create rollback version (for audit trail)
             rollback_version = self.bedrock_agent.create_prompt_version(
                 promptIdentifier=prompt_identifier,
                 description=f"ROLLBACK to v{target_version} - {rollback_reason}"
             )
             
-            # 5. 롤백 태그 적용
+            # 5. Apply rollback tags
             rollback_arn = rollback_version.get('arn')
             rollback_tags = {
                 'Environment': 'ROLLBACK',
@@ -295,27 +296,27 @@ class PromptVersionController:
     def promote_version(self, prompt_identifier: str, from_env: str, to_env: str, 
                        version_tag: str) -> bool:
         """
-        환경 간 버전 승격 - 실제 타겟 환경의 Prompt 업데이트
+        Cross-environment version promotion - Update target environment Prompt
         
         Args:
-            prompt_identifier: 소스 환경의 Prompt ID
-            from_env: 소스 환경
-            to_env: 타겟 환경
-            version_tag: 새 버전 태그
+            prompt_identifier: Source environment Prompt ID
+            from_env: Source environment
+            to_env: Target environment
+            version_tag: New version tag
             
         Returns:
-            성공 여부
+            Success status
         """
         try:
             print(f"🔄 Starting promotion from {from_env.upper()} to {to_env.upper()}...")
             
-            # 1. 소스 환경의 현재 DRAFT 내용 가져오기
+            # 1. Get source environment DRAFT content
             source_prompt = self.bedrock_agent.get_prompt(promptIdentifier=prompt_identifier)
             source_content = source_prompt['variants'][0]['templateConfiguration']['text']['text']
             
             print(f"📋 Source content: {source_content[:100]}...")
             
-            # 2. 타겟 환경의 Parameter Store에서 Prompt ID 가져오기
+            # 2. Get target environment Prompt ID from Parameter Store
             target_param_path = ENVIRONMENT_CONFIG[to_env]['parameter_store_path']
             
             try:
@@ -329,7 +330,7 @@ class PromptVersionController:
                 print(f"❌ Could not get target environment Prompt ID: {e}")
                 return False
             
-            # 3. 타겟 환경의 현재 Prompt 정보 가져오기
+            # 3. Get target environment current Prompt info
             try:
                 target_prompt = self.bedrock_agent.get_prompt(promptIdentifier=target_prompt_id)
                 print(f"📋 Current target content: {target_prompt['variants'][0]['templateConfiguration']['text']['text'][:100]}...")
@@ -337,7 +338,7 @@ class PromptVersionController:
                 print(f"❌ Could not get target prompt details: {e}")
                 return False
             
-            # 4. 타겟 환경의 DRAFT를 소스 내용으로 업데이트
+            # 4. Update target environment DRAFT with source content
             updated_variants = []
             for variant in target_prompt.get('variants', []):
                 updated_variant = variant.copy()
@@ -353,7 +354,7 @@ class PromptVersionController:
             
             print(f"✅ Updated {to_env.upper()} DRAFT with {from_env.upper()} content")
             
-            # 5. 타겟 환경에서 새 버전 생성
+            # 5. Create new version in target environment
             version_response = self.bedrock_agent.create_prompt_version(
                 promptIdentifier=target_prompt_id,
                 description=f"Promoted from {from_env.upper()} to {to_env.upper()} - {version_tag}"
@@ -362,7 +363,7 @@ class PromptVersionController:
             new_version = version_response.get('version')
             new_arn = version_response.get('arn')
             
-            # 6. 승격 태그 적용
+            # 6. Apply promotion tags
             base_tags = ENVIRONMENT_CONFIG.get(to_env, {}).get('default_tags', {})
             promotion_tags = {
                 **base_tags,
@@ -385,7 +386,7 @@ class PromptVersionController:
             print(f"   New version in {to_env.upper()}: {new_version} ({version_tag})")
             print(f"   Applied tags: {promotion_tags}")
             
-            # 7. 승격 후 검증
+            # 7. Post-promotion verification
             verification_prompt = self.bedrock_agent.get_prompt(promptIdentifier=target_prompt_id)
             verification_content = verification_prompt['variants'][0]['templateConfiguration']['text']['text']
             
@@ -403,7 +404,7 @@ class PromptVersionController:
             return False
 
 def interactive_demo():
-    """대화형 데모 실행"""
+    """Run interactive demo"""
     print("🌍 Environment Selection")
     print("=" * 40)
     print("Available environments:")
@@ -412,17 +413,17 @@ def interactive_demo():
         print(f"  {env.upper()}: {config['description']}")
         print(f"    Parameter Store: {config['parameter_store_path']}")
     
-    # 환경 선택
+    # Environment selection
     while True:
         selected_env = input(f"\n👉 Select environment ({'/'.join(SUPPORTED_ENVIRONMENTS)}): ").lower().strip()
         if selected_env in SUPPORTED_ENVIRONMENTS:
             break
         print(f"❌ Invalid environment. Please choose from: {', '.join(SUPPORTED_ENVIRONMENTS)}")
     
-    # 선택된 환경으로 컨트롤러 초기화
+    # Initialize controller with selected environment
     controller = PromptVersionController(environment=selected_env)
     
-    # 환경에서 Prompt ID 가져오기
+    # Get Prompt ID from environment
     prompt_id = controller.get_prompt_id_from_environment()
     if not prompt_id:
         print("❌ Could not retrieve prompt ID from Parameter Store")
@@ -468,7 +469,7 @@ def interactive_demo():
             print(f"\n🏷️ Creating new tagged version in {selected_env.upper()}...")
             content = input("Enter new content: ")
             
-            # 환경별 기본값 제공
+            # Provide environment-specific default
             default_version = f"v1.0.0-{selected_env}"
             version_tag = input(f"Enter version tag (default: {default_version}): ").strip()
             if not version_tag:
@@ -486,7 +487,7 @@ def interactive_demo():
         elif choice == "3":
             print(f"\n🔄 Rolling back in {selected_env.upper()} environment...")
             
-            # 먼저 버전 목록 표시
+            # Show version list first
             versions = controller.list_versions_with_tags(prompt_id)
             print("\nAvailable versions:")
             for i, version_info in enumerate(versions):
@@ -504,7 +505,7 @@ def interactive_demo():
         elif choice == "4":
             print(f"\n🚀 Promoting version from {selected_env.upper()}...")
             
-            # 타겟 환경 선택
+            # Target environment selection
             other_envs = [env for env in SUPPORTED_ENVIRONMENTS if env != selected_env]
             print(f"Available target environments: {', '.join(other_envs)}")
             
@@ -521,7 +522,7 @@ def interactive_demo():
         
         elif choice == "5":
             print("\n🔄 Switching environment...")
-            # 재귀 호출로 환경 재선택
+            # Recursive call for environment re-selection
             interactive_demo()
             return
         
@@ -533,7 +534,7 @@ def interactive_demo():
             print("⚠️ Invalid option, please try again")
 
 def main():
-    """메인 실행 함수"""
+    """Main execution function"""
     print("🚀 Starting Prompt Version Control")
     print("This demo will show you how to:")
     print("  • Select working environment (DEV/PROD)")
